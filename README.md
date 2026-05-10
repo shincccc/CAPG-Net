@@ -6,7 +6,7 @@ Climate-Adaptive Physics-Guided Network for dUT1 Forecasting
 
 ```
 ├── data_processor.py         # Data loading and preprocessing
-├── train_dual_physics.py     # Model training
+├── train.py                  # Model training
 ├── eval.py                   # Batch model evaluation
 ├── configs.py                # Data paths and parameters
 ├── dl_models/                # Model implementations
@@ -27,7 +27,7 @@ Configure data paths in `configs.py`, then:
 
 ```bash
 # Train
-python train_dual_physics.py
+python train.py
 
 # Evaluate
 python eval.py
