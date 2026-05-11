@@ -16,15 +16,11 @@ from dl_models.losses import KoopmanLoss
 
 # Default learning rates per model (unlisted models use 0.001)
 LR_DEFAULTS = {
-    'lstm': 0.002, 'lstm_attn': 0.005,
-    'node': 0.001,
-    'patchtst': 0.001, 'patchtst_ms': 0.001,
-    'dlinear': 0.001, 'nlinear': 0.001,
-    'tide': 0.001, 'tsmixer': 0.001, 'frets': 0.001,
-    'informer': 0.0005, 'fedformer': 0.0005,
-    'itransformer': 0.001, 'crossformer': 0.0005,
-    'tcn': 0.001, 'timesnet': 0.001, 'scinet': 0.001,
-    'mamba': 0.001, 'koopa': 0.001,
+    'lstm': 0.002,
+    'patchtst': 0.001,
+    'dlinear': 0.001,
+    'tcn': 0.001,
+    'timesnet': 0.001,
 }
 
 warnings.filterwarnings('ignore')
@@ -67,7 +63,7 @@ def get_max_abs_nino_in_window(nino_series, curr_date, lag_min=200, lag_max=300,
 
 class Trainer:
     def __init__(self, config, model_type_fluid='lstm', forecast_days=180,
-                 fluid_roll_epochs=30, skip_warmup=False, accumulate_weights=False):
+                 fluid_roll_epochs=30, skip_pretrain=False, accumulate_weights=False):
         """
         Initialize incremental rolling trainer
 
@@ -76,7 +72,7 @@ class Trainer:
             model_type_fluid: Fluid model type ('lstm', 'node', 'patchtst', etc.)
             forecast_days: Forecast horizon in days
             fluid_roll_epochs: Number of epochs for Fluid model rolling training (default 30)
-            skip_warmup: Whether to skip Warm-up and use cached weights directly
+            skip_pretrain: Whether to skip Pretrain and use cached weights directly
             accumulate_weights: Whether to enable rolling accumulated training
         """
         self.config = config
@@ -84,14 +80,14 @@ class Trainer:
         self.model_type_fluid = model_type_fluid
         self.forecast_days = forecast_days
         self.fluid_roll_epochs = fluid_roll_epochs
-        self.skip_warmup = skip_warmup
+        self.skip_pretrain = skip_pretrain
         self.accumulate_weights = accumulate_weights
 
         print(f"⚡ Device: {self.device}")
         print(f"🧠 Fluid model type: {model_type_fluid.upper()}")
         print(f"📅 Forecast horizon: {forecast_days} days")
         print(f"📈 Fluid rolling training epochs: {fluid_roll_epochs}")
-        print(f"🔄 Skip Warm-up: {skip_warmup}")
+        print(f"🔄 Skip Pretrain: {skip_pretrain}")
         print(f"🔄 Rolling accumulated training: {accumulate_weights}")
 
         self.OMEGA1 = 2 * np.pi / 365.2425
@@ -120,17 +116,17 @@ class Trainer:
 
         # Fluid model weight save paths
         self.model_save_path = "./weight/fluid_model_weights/trained_model_weights_" + str(forecast_days) + "_" + model_type_fluid + ".pth"
-        # Warm-up initial weight save path
-        self.warmup_save_path = "./weight/fluid_model_weights/warmup_initial_weights_" + str(forecast_days) + "_" + model_type_fluid + ".pth"
+        # Pretrain initial weight save path
+        self.pretrain_save_path = "./weight/fluid_model_weights/pretrained_weights_" + str(forecast_days) + "_" + model_type_fluid + ".pth"
         # Rolling accumulated weight save path
         self.roll_accumulate_path = "./weight/fluid_model_weights/roll_accumulated_" + str(forecast_days) + "_" + model_type_fluid + ".pth"
 
         self.model_fluid = None
         self.optimizer = None
 
-    def _evaluate_warmup_sufficiency(self, val_loader, criterion, eval_year, forecast_days):
+    def _evaluate_pretrain_sufficiency(self, val_loader, criterion, eval_year, forecast_days):
         """
-        Evaluate whether Warm-up training is sufficient
+        Evaluate whether Pretrain training is sufficient
 
         Metrics:
         1. Validation loss curve (convergence)
@@ -181,7 +177,7 @@ class Trainer:
 
         # Print evaluation results
         print(f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"   📈 Warm-up validation metrics:")
+        print(f"   📈 Pretrain validation metrics:")
         print(f"   • Average MAE: {overall_mae:.3f} ms (range: {min_mae:.3f} ~ {max_mae:.3f} ms)")
         print(f"   • Systematic bias: {bias:.3f} ms")
         print(f"   • Residual std: {residual_std:.3f} ms")
@@ -291,16 +287,16 @@ class Trainer:
             except Exception as e:
                 print(f"⚠️ Failed to load Fluid model weights: {e}")
 
-        # Fallback: try loading warm-up initial weights
-        if os.path.exists(self.warmup_save_path):
+        # Fallback: try loading pretrain initial weights
+        if os.path.exists(self.pretrain_save_path):
             try:
-                checkpoint = torch.load(self.warmup_save_path, map_location=self.device)
+                checkpoint = torch.load(self.pretrain_save_path, map_location=self.device)
                 self.model_fluid.load_state_dict(checkpoint['model_state_dict'])
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                print(f"✅ Successfully loaded Fluid Warm-up weights from {self.warmup_save_path}")
+                print(f"✅ Successfully loaded Fluid pretrained weights from {self.pretrain_save_path}")
                 return True
             except Exception as e:
-                print(f"⚠️ Failed to load Fluid Warm-up weights: {e}")
+                print(f"⚠️ Failed to load Fluid pretrained weights: {e}")
 
         print(f"⚠️ No Fluid model weights found, will use randomly initialized model")
         return False
@@ -475,7 +471,7 @@ class Trainer:
             np.array(y_core_seq), \
             np.array(date_list), np.array(baseline_fluid_anchors), np.array(ls_errors), core_ls_baseline_array
 
-    def train_rolling(self, lookback=None, forecast_days=90, epoch_warm=150, epoch_roll=30, start_year=2015, skip_rolling=False):
+    def train_rolling(self, lookback=None, forecast_days=90, epoch_pretrain=150, epoch_roll=30, start_year=2015, skip_rolling=False):
 
         from data_processor import DataProcessor
         processor = DataProcessor(self.config)
@@ -537,19 +533,19 @@ class Trainer:
         # Ensure not exceeding maximum year
         eval_years = eval_years[eval_years <= max_year]
 
-        # If skip_rolling is set, all years use Warm-up weights for evaluation directly (no Fine-tune)
+        # If skip_rolling is set, all years use pretrained weights for evaluation directly (no Fine-tune)
         if skip_rolling and len(eval_years) > 0:
-            print(f"\n⏭️ Skip rolling training mode: all years use Warm-up weights for evaluation (no Fine-tune)")
+            print(f"\n⏭️ Skip rolling training mode: all years use Pretrained weights for evaluation (no Fine-tune)")
 
-        # Check if Warm-up initial weight file exists
-        has_warmup_weights = os.path.exists(self.warmup_save_path)
+        # Check if Pretrain weight file exists
+        has_pretrained_weights = os.path.exists(self.pretrain_save_path)
 
         print(f"\n🔄 Starting smart rolling training")
         print(f"   Evaluation years: {eval_years[0]} - {eval_years[-1]}")
-        print(f"   Strategy: first year Warm-up ({epoch_warm} Epochs), subsequent Fine-tune ({epoch_roll} Epochs)")
+        print(f"   Strategy: first year Pretrain ({epoch_pretrain} Epochs), subsequent Fine-tune ({epoch_roll} Epochs)")
         print(f"   Sampling strategy: first year 5000 samples, subsequent 2000 samples")
         print(f"   Weight reuse: {'✅ Loaded' if weights_loaded else '🆕 First training'}")
-        print(f"   Warm-up cache: {'✅ Exists, will skip' if has_warmup_weights else '🆕 Needs execution'}")
+        print(f"   Pretrained cache: {'✅ Exists, will skip' if has_pretrained_weights else '🆕 Needs execution'}")
         print(f"   Core prediction: LS extrapolation (fixed)")
         print(f"   Max year limit: {max_year}")
 
@@ -564,47 +560,47 @@ class Trainer:
 
             # --- 1. Dynamically determine training parameters ---
             if is_first_year:
-                    if has_warmup_weights:
-                        print(f"   ⏭️ Warm-up cache detected, loading weights...")
+                    if has_pretrained_weights:
+                        print(f"   ⏭️ Pretrained cache detected, loading weights...")
                         try:
-                            warmup_checkpoint = torch.load(self.warmup_save_path, map_location=self.device)
-                            self.model_fluid.load_state_dict(warmup_checkpoint['model_state_dict'])
-                            self.optimizer.load_state_dict(warmup_checkpoint['optimizer_state_dict'])
-                            print(f"   ✅ Successfully loaded Warm-up weights")
+                            pretrain_checkpoint = torch.load(self.pretrain_save_path, map_location=self.device)
+                            self.model_fluid.load_state_dict(pretrain_checkpoint['model_state_dict'])
+                            self.optimizer.load_state_dict(pretrain_checkpoint['optimizer_state_dict'])
+                            print(f"   ✅ Successfully loaded pretrained weights")
 
-                            if self.skip_warmup:
-                                print(f"   ⏩ Skip Warm-up enabled: skipping training phase, evaluating directly")
+                            if self.skip_pretrain:
+                                print(f"   ⏩ Skip pretrain enabled: skipping training phase, evaluating directly")
                                 skip_training = True
                                 current_epochs = 0
                             else:
                                 skip_training = False
                                 current_epochs = 50
-                                print(f"   🔄 Skip Warm-up disabled: continuing training for {current_epochs} epochs on Warm-up weights")
+                                print(f"   🔄 Skip pretrain disabled: continuing training for {current_epochs} epochs on pretrained weights")
                         except Exception as e:
-                            print(f"   ⚠️ Failed to load Warm-up weights: {e}, will execute normal Warm-up")
+                            print(f"   ⚠️ Failed to load pretrained weights: {e}, will execute normal pretrain")
                             skip_training = False
-                            current_epochs = epoch_warm
+                            current_epochs = epoch_pretrain
                     else:
                         skip_training = False
-                        current_epochs = epoch_warm
+                        current_epochs = epoch_pretrain
 
                     sample_size = 5000
                     lr_adjustment = 1.0
-                    desc_str = f"Year {eval_year} [Warm-up]" if not has_warmup_weights else f"Year {eval_year} [Fine-tune on Warm-up]"
+                    desc_str = f"Year {eval_year} [Pretrain]" if not has_pretrained_weights else f"Year {eval_year} [Fine-tune on Pretrain]"
             else:
                     if skip_rolling:
                         skip_training = True
-                        print(f"   ⏭️ Skipping Fine-tune, evaluating directly with Warm-up weights")
+                        print(f"   ⏭️ Skipping Fine-tune, evaluating directly with pretrained weights")
                     else:
                         skip_training = False
-                        if has_warmup_weights:
-                            print(f"   🔧 Using Warm-up weights as initialization, starting Fine-tune training...")
+                        if has_pretrained_weights:
+                            print(f"   🔧 Using pretrained weights as initialization, starting Fine-tune training...")
                             try:
-                                warmup_checkpoint = torch.load(self.warmup_save_path, map_location=self.device)
-                                self.model_fluid.load_state_dict(warmup_checkpoint['model_state_dict'])
-                                print(f"   ✅ Warm-up weights loaded as initialization point")
+                                pretrain_checkpoint = torch.load(self.pretrain_save_path, map_location=self.device)
+                                self.model_fluid.load_state_dict(pretrain_checkpoint['model_state_dict'])
+                                print(f"   ✅ Pretrained weights loaded as initialization point")
                             except Exception as e:
-                                print(f"   ⚠️ Failed to load Warm-up weights: {e}, continuing with current weights")
+                                print(f"   ⚠️ Failed to load pretrained weights: {e}, continuing with current weights")
                         # If rolling accumulated training is enabled, load previous year's accumulated weights
                         if self.accumulate_weights and i > 0:
                             prev_year = eval_years[i-1]
@@ -629,7 +625,7 @@ class Trainer:
             if is_first_year:
                 TARGET_TRAIN_YEARS = 999
                 ROLLING_WINDOW_YEARS = TARGET_TRAIN_YEARS
-                desc_suffix = "[Warm-up full history]"
+                desc_suffix = "[Pretrain full history]"
             else:
                 ROLLING_WINDOW_YEARS = 10
                 desc_suffix = "[Fine-tune 10-year window]"
@@ -896,19 +892,19 @@ class Trainer:
                     self.model_fluid.load_state_dict(best_fluid_model_state['model_state_dict'])
                     self.optimizer.load_state_dict(best_fluid_model_state['optimizer_state_dict'])
 
-                # Save Warm-up weights if first year
+                # Save Pretrain weights if first year
                 if is_first_year and not skip_training:
                     try:
                         torch.save({
                             'model_state_dict': self.model_fluid.state_dict(),
                             'optimizer_state_dict': self.optimizer.state_dict(),
-                            'epoch_warm': epoch_warm,
+                            'epoch_pretrain': epoch_pretrain,
                             'eval_year': eval_year,
-                        }, self.warmup_save_path)
-                        print(f"   💾 Warm-up initial weights saved to {self.warmup_save_path}")
-                        print(f"      Subsequent runs will automatically skip Warm-up phase, each round independently fine-tuning from these weights")
+                        }, self.pretrain_save_path)
+                        print(f"   💾 Pretrained weights saved to {self.pretrain_save_path}")
+                        print(f"      Subsequent runs will automatically skip pretrain phase, each round independently fine-tuning from these weights")
                     except Exception as e:
-                        print(f"   ⚠️ Failed to save Warm-up weights: {e}")
+                        print(f"   ⚠️ Failed to save pretrained weights: {e}")
                 else:
                     if self.accumulate_weights and not is_first_year:
                         roll_accumulate_path = f"./weight/fluid_model_weights/roll_accumulated_{self.forecast_days}_{self.model_type_fluid}_year{eval_year}.pth"
@@ -924,10 +920,10 @@ class Trainer:
                     else:
                         print(f"   Fluid independent fine-tuning complete, accumulated weights not saved")
 
-                # Warm-up training sufficiency evaluation (first year only after training)
+                # Pretrain training sufficiency evaluation (first year only after training)
                 if is_first_year and val_loader is not None:
-                    print(f"\n   📊 Warm-up training sufficiency evaluation:")
-                    self._evaluate_warmup_sufficiency(
+                    print(f"\n   📊 Pretrain sufficiency evaluation:")
+                    self._evaluate_pretrain_sufficiency(
                         val_loader, criterion, eval_year, forecast_days
                     )
 
@@ -1145,13 +1141,13 @@ if __name__ == "__main__":
         model_type_fluid=model_type_fluid,
         forecast_days=forecast_days,
         fluid_roll_epochs=15,
-        skip_warmup=True,
+        skip_pretrain=True,
         accumulate_weights=True,
     )
 
     trainer.train_rolling(
         forecast_days=forecast_days,
-        epoch_warm=150,
+        epoch_pretrain=150,
         epoch_roll=10,
         start_year=2015,
         skip_rolling=True,
