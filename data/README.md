@@ -3,7 +3,7 @@
 This directory contains all datasets used by CAPG-Net.
 
 ## Structure
-
+```
 data/
 ├── EOP/
 │   ├── ori/           # Raw EOP data from IERS (txt + csv)
@@ -13,7 +13,7 @@ data/
 │   ├── ori/           # Raw EAM data from GFZ (annual .asc files)
 │   └── processed/     # Processed EAM data (daily CSV per component)
 └── utils/             # Data preprocessing scripts
-
+```
 ## Data Sources
 
 | Dataset | Source |
