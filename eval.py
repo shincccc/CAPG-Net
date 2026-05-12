@@ -176,8 +176,6 @@ class BatchTester:
                 lag_pos_val = best_lag_pos_max if best_lag_pos_max is not None else 0
                 lag_neg_val = best_lag_neg_max if best_lag_neg_max is not None else 0
 
-                # pos_pos = np.exp(-lag_pos_val / MAX_LAG)
-                # pos_neg = np.exp(-lag_neg_val / MAX_LAG)
                 pos_pos = (lag_pos_val - MIN_LAG) / (MAX_LAG - MIN_LAG)
                 pos_neg = (lag_neg_val - MIN_LAG) / (MAX_LAG - MIN_LAG)
             else:
@@ -187,14 +185,14 @@ class BatchTester:
             season_sin = np.sin(2 * np.pi * day_of_year / 365.25)
             season_cos = np.cos(2 * np.pi * day_of_year / 365.25)
 
-            static_features = np.array([
-                nino_lag_pos_max, pos_pos, nino_lag_neg_max, pos_neg, season_sin, season_cos
-            ])
+            # static_features = np.array([
+            #     nino_lag_pos_max, pos_pos, nino_lag_neg_max, pos_neg, season_sin, season_cos
+            # ])
 
             # ablation configurations
-            # static_features = np.array([
-            #     season_sin, season_cos
-            # ])
+            static_features = np.array([
+                season_sin, season_cos
+            ])
 
             X_static_list.append(static_features)
 
@@ -333,7 +331,8 @@ class BatchTester:
         data = {'Year': all_years}
         for forecast_days, result in self.results.items():
             year_maes = result['yearly']
-            data[f'{forecast_days}d'] = [year_maes.get(y, np.nan) for y in all_years]
+            # 保留三位有效数字
+            data[f'{forecast_days}d'] = [round(year_maes.get(y, np.nan), 3) if not np.isnan(year_maes.get(y, np.nan)) else np.nan for y in all_years]
         df = pd.DataFrame(data)
 
         # 年际统计（每年等权重）
@@ -341,13 +340,21 @@ class BatchTester:
         for forecast_days in self.results.keys():
             col_name = f'{forecast_days}d'
             values = [v for v in df[col_name].dropna()]
-            stats_annual[col_name] = f"{np.mean(values):.3f}±{np.std(values):.3f}" if values else "N/A"
+            if values:
+                mean_val = round(np.mean(values), 3)
+                std_val = round(np.std(values), 3)
+                stats_annual[col_name] = mean_val  # 只保存均值作为数值
+            else:
+                stats_annual[col_name] = np.nan
 
         # 全样本平均（所有样本直接求均值）
         stats_global = {'Year': 'Global avg'}
         for forecast_days, result in self.results.items():
             errors = result['global_errors']
-            stats_global[f'{forecast_days}d'] = f"{np.mean(errors):.3f}" if errors else "N/A"
+            if errors:
+                stats_global[f'{forecast_days}d'] = round(np.mean(errors), 3)
+            else:
+                stats_global[f'{forecast_days}d'] = np.nan
 
         df = pd.concat([df, pd.DataFrame([stats_annual]), pd.DataFrame([stats_global])], ignore_index=True)
 
