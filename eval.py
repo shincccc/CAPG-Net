@@ -185,14 +185,14 @@ class BatchTester:
             season_sin = np.sin(2 * np.pi * day_of_year / 365.25)
             season_cos = np.cos(2 * np.pi * day_of_year / 365.25)
 
-            # static_features = np.array([
-            #     nino_lag_pos_max, pos_pos, nino_lag_neg_max, pos_neg, season_sin, season_cos
-            # ])
+            static_features = np.array([
+                nino_lag_pos_max, pos_pos, nino_lag_neg_max, pos_neg, season_sin, season_cos
+            ])
 
             # ablation configurations
-            static_features = np.array([
-                season_sin, season_cos
-            ])
+            # static_features = np.array([
+            #     season_sin, season_cos
+            # ])
 
             X_static_list.append(static_features)
 
