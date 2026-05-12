@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Batch Model Testing Script - Multi-Year Forecast Evaluation
-(Supports dynamic routing: auto-adapts weight paths and forward passes for gated models and baseline comparison models)
 """
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
