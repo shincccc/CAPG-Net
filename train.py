@@ -1,4 +1,15 @@
-# train_dual_physics.py
+#!/usr/bin/env python3
+"""
+CAPG-Net: Climate-Adaptive Physics-Guided Network for dUT1 Forecasting
+-----------------------------------------------------------------------
+Including:
+  - Physics-based signal decoupling: separates LOD into core and fluid components
+  - Climate-adaptive gating: encodes Niño-3.4 extremum, lag position, and seasonal phase
+  - LS extrapolation for the core component
+  - Training CAPG-Net with early stopping and ReduceLROnPlateau
+Usage:
+  python train.py
+"""
 
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
@@ -1134,7 +1145,7 @@ if __name__ == "__main__":
     # NOTE: For CAPG-Net results in the paper, use:
     # model_type_fluid = 'lstm_enso_gate'
     # skip_rolling = True
-    # Rolling training is NOT used for CAPG-Net.
+    # Rolling training is NOT used for CAPG-Net. 
 
     trainer = Trainer(
         config,
